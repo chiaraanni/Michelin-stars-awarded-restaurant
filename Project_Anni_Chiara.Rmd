@@ -1,0 +1,913 @@
+---
+title: "Statistical_learning_project_Anni_Chiara"
+output: html_document
+date: "2023-07-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidyr)
+library("stringr")
+library(plyr)
+library("readxl")
+library(dplyr)
+library(leaps)
+library(randomForest)
+library(nnet)
+library(reshape2)
+library(Hmisc)
+library('fastDummies')
+library(car)
+library(ggpubr)
+library(corrplot)
+library("PerformanceAnalytics")
+library(lmtest)
+library(olsrr)
+library(tree)
+library(ggplot2)
+library("estimatr")
+library(geosphere)
+library(sp)
+library(rgdal)
+```
+
+--------------------------------------------------------------------------------
+BUILDING THE DATASET
+
+```{r}
+ds1=read_excel("C:\\Users\\Lenovo\\OneDrive - Università degli Studi di Milano\\MAGISTRALE\\STATISTICAL LEARNING\\PROGETTO_Guida Michelin\\Michelin Star Restaurants 2021_Italia.xlsx")
+```
+
+```{r}
+ds1=as.data.frame(ds1)
+ds1
+```
+
+```{r}
+
+star1=read.csv("C:\\Users\\Lenovo\\OneDrive - Università degli Studi di Milano\\MAGISTRALE\\STATISTICAL LEARNING\\PROGETTO_Guida Michelin\\one-star-michelin-restaurants.csv") 
+
+star2=read.csv("C:\\Users\\Lenovo\\OneDrive - Università degli Studi di Milano\\MAGISTRALE\\STATISTICAL LEARNING\\PROGETTO_Guida Michelin\\two-stars-michelin-restaurants.csv") 
+
+star3= read.csv("C:\\Users\\Lenovo\\OneDrive - Università degli Studi di Milano\\MAGISTRALE\\STATISTICAL LEARNING\\PROGETTO_Guida Michelin\\three-stars-michelin-restaurants.csv") 
+
+```
+
+```{r}
+sum(is.na(ds1))
+MG<-na.omit(ds1)
+
+sum(is.na(star1))
+MG<-na.omit(star1)
+
+sum(is.na(star2))
+MG<-na.omit(star2)
+
+sum(is.na(star3))
+MG<-na.omit(star3)
+```
+
+Clean and union of star1, star2 and star3
+
+```{r}
+star1$zipCode<-NULL
+star1$url<-NULL
+star1$"michelin stars"<-1
+
+star2$zipCode<-NULL
+star2$url<-NULL
+star2$"michelin stars"<-2
+
+star3$zipCode<-NULL
+star3$url<-NULL
+star3$"michelin stars"<-3
+```
+
+```{r}
+MG=union_all(star1,star2)
+MG=union_all(MG,star3)
+```
+
+
+Clean of the first dataset
+```{r}
+#equate the column name between ds1 and ds2
+names(ds1)[1]="name"
+names(ds1)[13]="latitude"
+names(ds1)[14]="longitude"
+names(ds1)
+```
+
+```{r}
+#extract the region
+reg=word(ds1$`michelin guide`,start = 3, end =3 , sep=fixed(" "))
+ds1$region<-reg
+
+city=word(ds1$address,start = -3, end =-3 , sep=fixed(","))
+ds1$city<-city
+```
+
+```{r}
+#delate extra column
+ds1$link<-NULL
+ds1$website<-NULL
+ds1$address<-NULL
+ds1$`opening hours`<-NULL
+ds1$`contact number`<-NULL
+ds1$`michelin guide`<-NULL
+ds1$`facilities & services`<-NULL
+ds1$`michelin guide point of view`<-NULL
+
+#adding year
+ds1$year<-2021
+ds1$region<-str_to_title(ds1$region) 
+names(ds1)
+```
+
+
+Change price range
+```{r}
+eur=word(ds1$price, start=-1, end=-1, sep = fixed(" "))
+ds1$eur<-eur
+ds1<-subset(ds1, ds1$eur == "EUR")
+ds1$eur<-NULL
+
+price1=word(ds1$price, start = 1, end = 1 , sep=fixed(" "))
+price1<-as.numeric(price1)
+price2=word(ds1$price,start = -2, end =-2 , sep=fixed(" "))
+price2<-as.numeric(price2)
+
+price_mean= price1+ (price2-price1)/2
+ds1$price<-price_mean
+
+```
+
+
+
+Estimate prices $
+```{r}
+intersection=intersect(MG$name,ds1$name)
+```
+
+```{r}
+eu=c()
+doll=c()
+
+for (i in 1:length(intersection)) {
+  eu=append(eu,ds1[ds1$name== intersection[i],]$price)
+  doll=append(doll,MG[MG$name== intersection[i],]$price)
+  MG[MG$name== intersection[i],]$price<-eu[i]
+}
+
+```
+
+```{r}
+MG[MG$price=='$',]$price<-65
+MG[MG$price=='$$',]$price<-85
+MG[MG$price=='$$$',]$price<-100
+MG[MG$price=='$$$$',]$price<-115
+MG[MG$price=='$$$$$',]$price<-130
+MG$price<-as.numeric(MG$price)
+```
+
+FINAL DATASET
+```{r}
+MG=union(MG,ds1)
+names(MG)[9]="stars"
+MG$name<-NULL
+```
+
+Delate null value
+```{r}
+sum(is.na(MG))
+MG<-na.omit(MG)
+```
+
+
+
+
+--------------------------------------------------------------------------------
+#Datasets with the outlier- World
+
+```{r}
+cuisine_dummy_out=word(MG$cuisine, start = 1, end = 1 , sep=fixed(","))
+cuisine_dummy_out=word(cuisine_dummy_out, start = 1, end = 1 , sep=fixed(" "))
+cuisine_dummy_out<-str_to_title(cuisine_dummy_out)
+cuisine_dummy_out<-noquote(cuisine_dummy_out)
+cuisine_dummy_out<-gsub(',','',cuisine_dummy_out)
+cuisine_dummy_out<-gsub('_','',cuisine_dummy_out)
+cuisine_dummy_out[cuisine_dummy_out=='Basque']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Austrian']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Californian']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Campanian']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Californian']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Cantonese']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Catalan']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Danish']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Corsican']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Dim']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Emilian']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Finnish']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='French']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Fujian']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Fusion']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Galician']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Gastropub']<-"Contemporary"
+cuisine_dummy_out[cuisine_dummy_out=='French']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Greek']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Hang']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Barbecue']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Hunanese']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='India']<-"Asia"
+cuisine_dummy_out[cuisine_dummy_out=='Irish']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Israeli']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Italian']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Japanese']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Korean']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Mediterranean']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Mexican']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Moroccan']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Noodles']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Peranakan']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Peruvian']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Piedmontese']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Portuguese']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Provençal']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Scandinavian']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Shanghainese']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Sichuan']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Sichuan-Hai']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Southern']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Spanish']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Steakhouse']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Sushi']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Street']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Taiwanese']<-"American"
+cuisine_dummy_out[cuisine_dummy_out=='Taizhou']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Temple']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Teppanyaki']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Thai']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Tuscan']<-"European"
+cuisine_dummy_out[cuisine_dummy_out=='Vegetarian']<-"Vegan"
+cuisine_dummy_out[cuisine_dummy_out=='World']<-"International"
+cuisine_dummy_out[cuisine_dummy_out=='Organic']<-"Vegan"
+cuisine_dummy_out[cuisine_dummy_out=='Classic']<-"Traditional"
+cuisine_dummy_out[cuisine_dummy_out=='Contemporary']<-"Innovative"
+cuisine_dummy_out[cuisine_dummy_out=='Vegetarian']<-"Vegan"
+cuisine_dummy_out[cuisine_dummy_out=='Creative']<-"Innovative"
+cuisine_dummy_out[cuisine_dummy_out=='Cuisine']<-"Traditional"
+cuisine_dummy_out[cuisine_dummy_out=='Home']<-"Traditional"
+cuisine_dummy_out[cuisine_dummy_out=='Indian']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Chinese']<-"Asian"
+cuisine_dummy_out[cuisine_dummy_out=='Classic']<-"Traditional"
+cuisine_dummy_out[cuisine_dummy_out=='Market']<-"Traditional"
+cuisine_dummy_out[cuisine_dummy_out=='Modern']<-"Innovative"
+cuisine_dummy_out[cuisine_dummy_out=='Sichuan-Huai']<-"Asian"
+
+
+
+
+dummy_world <-MG #with outlier
+dummy_world$cuisine<-cuisine_dummy_out
+dummy_world<-dummy_cols(dummy_world, select_columns = "cuisine")
+names(dummy_world)
+
+```
+
+In the analysis with outlier we can anyways exclude the singl extreme point:
+```{r}
+plot(dummy_world$price~dummy_world$latitude, xlab="latitude",ylab="price", col="blue")
+plot(dummy_world$price~dummy_world$longitude, xlab="longitude",ylab="price", col="blue")
+plot(dummy_world$price~dummy_world$stars, xlab="stars",ylab="price", col="blue")
+text(dummy_world$stars, dummy_world$price)
+```
+
+```{r}
+plot(dummy_world$price, xlab="stars",ylab="value", col="blue")
+text(dummy_world$price)
+```
+
+
+```{r}
+dummy_world<-dummy_world[-c(1549,2226,2341,1560),]
+MG<-MG[-c(1549,2226,2341,1560),]
+```
+
+```{r}
+plot(dummy_world$price, xlab="stars",ylab="value", col="blue")
+text(dummy_world$price)
+```
+
+FIND OUTLIER
+```{r}
+ggplot(gather(select(MG, -c("city","region","cuisine"))), aes(value)) + 
+    geom_boxplot(color="blue", fill="lightblue", alpha=0.2) + 
+    facet_wrap(~key, scales = 'free')
+
+```
+
+```{r}
+ggplot(gather(select(MG, -c("city","region","cuisine","stars"))), aes(value)) +
+    geom_histogram(bins = 10,color="blue", fill="lightblue", alpha=0.2) + 
+    facet_wrap(~key, scales = 'free')
+
+```
+
+```{r}
+for (i in 1:4) {
+for (x in MG %>% select(-c("cuisine","city","region","stars","year","price")) %>% names())
+{
+  value = MG[,x][MG[,x] %in% boxplot.stats(MG[,x])$out]
+  MG[,x][MG[,x] %in% value] = NA
+  MG = drop_na(MG)
+} }
+head(MG)
+```
+
+
+```{r}
+ggplot(gather(select(MG, -c("city","region","cuisine","stars","price"))), aes(value)) + 
+    geom_boxplot(color="blue", fill="lightblue", alpha=0.2) + 
+    facet_wrap(~key,scales = 'free')
+```
+
+```{r}
+ggplot(gather(select(MG, -c("city","region","cuisine","stars"))), aes(value)) +
+    geom_histogram(bins = 10,color="blue", fill="lightblue", alpha=0.2) + 
+    facet_wrap(~key, scales = 'free')
+
+```
+
+
+```{r}
+cuisine_dummy=word(MG$cuisine, start = 1, end = 1 , sep=fixed(","))
+cuisine_dummy=word(cuisine_dummy, start = 1, end = 1 , sep=fixed(" "))
+cuisine_dummy<-str_to_title(cuisine_dummy)
+cuisine_dummy<-noquote(cuisine_dummy)
+cuisine_dummy<-gsub(',','',cuisine_dummy)
+cuisine_dummy<-gsub('_','',cuisine_dummy)
+cuisine_dummy[cuisine_dummy=='Basque']<-"European"
+cuisine_dummy[cuisine_dummy=='Austrian']<-"European"
+cuisine_dummy[cuisine_dummy=='Californian']<-"American"
+cuisine_dummy[cuisine_dummy=='Campanian']<-"European"
+cuisine_dummy[cuisine_dummy=='Californian']<-"American"
+cuisine_dummy[cuisine_dummy=='Cantonese']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Catalan']<-"European"
+cuisine_dummy[cuisine_dummy=='Danish']<-"European"
+cuisine_dummy[cuisine_dummy=='Corsican']<-"European"
+cuisine_dummy[cuisine_dummy=='Dim']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Emilian']<-"European"
+cuisine_dummy[cuisine_dummy=='Finnish']<-"European"
+cuisine_dummy[cuisine_dummy=='French']<-"European"
+cuisine_dummy[cuisine_dummy=='Fujian']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Fusion']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Galician']<-"European"
+cuisine_dummy[cuisine_dummy=='Gastropub']<-"Contemporary"
+cuisine_dummy[cuisine_dummy=='French']<-"European"
+cuisine_dummy[cuisine_dummy=='Greek']<-"European"
+cuisine_dummy[cuisine_dummy=='Hang']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Barbecue']<-"American"
+cuisine_dummy[cuisine_dummy=='Hunanese']<-"Asian"
+cuisine_dummy[cuisine_dummy=='India']<-"Asia"
+cuisine_dummy[cuisine_dummy=='Irish']<-"European"
+cuisine_dummy[cuisine_dummy=='Israeli']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Italian']<-"European"
+cuisine_dummy[cuisine_dummy=='Japanese']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Korean']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Mediterranean']<-"European"
+cuisine_dummy[cuisine_dummy=='Mexican']<-"American"
+cuisine_dummy[cuisine_dummy=='Moroccan']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Noodles']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Peranakan']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Peruvian']<-"American"
+cuisine_dummy[cuisine_dummy=='Piedmontese']<-"European"
+cuisine_dummy[cuisine_dummy=='Portuguese']<-"European"
+cuisine_dummy[cuisine_dummy=='Provençal']<-"European"
+cuisine_dummy[cuisine_dummy=='Scandinavian']<-"European"
+cuisine_dummy[cuisine_dummy=='Shanghainese']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Sichuan']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Sichuan-Hai']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Southern']<-"European"
+cuisine_dummy[cuisine_dummy=='Spanish']<-"European"
+cuisine_dummy[cuisine_dummy=='Steakhouse']<-"American"
+cuisine_dummy[cuisine_dummy=='Sushi']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Street']<-"American"
+cuisine_dummy[cuisine_dummy=='Taiwanese']<-"American"
+cuisine_dummy[cuisine_dummy=='Taizhou']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Temple']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Teppanyaki']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Thai']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Tuscan']<-"European"
+cuisine_dummy[cuisine_dummy=='Vegetarian']<-"Vegan"
+cuisine_dummy[cuisine_dummy=='World']<-"International"
+cuisine_dummy[cuisine_dummy=='Organic']<-"Vegan"
+cuisine_dummy[cuisine_dummy=='Classic']<-"Traditional"
+cuisine_dummy[cuisine_dummy=='Contemporary']<-"Innovative"
+cuisine_dummy[cuisine_dummy=='Vegetarian']<-"Vegan"
+cuisine_dummy[cuisine_dummy=='Creative']<-"Innovative"
+cuisine_dummy[cuisine_dummy=='Cuisine']<-"Traditional"
+cuisine_dummy[cuisine_dummy=='Home']<-"Traditional"
+cuisine_dummy[cuisine_dummy=='Indian']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Chinese']<-"Asian"
+cuisine_dummy[cuisine_dummy=='Classic']<-"Traditional"
+cuisine_dummy[cuisine_dummy=='Market']<-"Traditional"
+cuisine_dummy[cuisine_dummy=='Modern']<-"Innovative"
+cuisine_dummy[cuisine_dummy=='Sichuan-Huai']<-"Asian"
+
+
+dummy_eur <-MG #tolti già outlier
+dummy_eur$cuisine<-cuisine_dummy
+dummy_eur<-dummy_cols(dummy_eur, select_columns = "cuisine")
+names(dummy_eur)
+```
+
+--------------------------------------------------------------------------------
+#EXPLANATORY ANALYSIS
+
+
+Distribution of restaurants
+```{r}
+MyMap1 <- ggplot() + borders("world", colour="grey40", fill="blue",alpha=0.4) + 
+  theme(panel.grid = element_blank())+
+  geom_point(aes(x=longitude,y=latitude,color=factor(stars),),data=dummy_world, alpha=0.4)+
+  scale_color_manual(values=c("yellow", "green", "red"))+
+  labs(color = "Michelin stars")+
+  ggtitle("Distribution of restaurants around the worl")
+MyMap1
+```
+
+```{r}
+MyMap2 <- ggplot() + borders("world", colour="grey30", fill="blue",alpha=0.4) + 
+  theme(panel.grid = element_blank())+
+  geom_point(aes(x=longitude,y=latitude,color=factor(stars),),data=dummy_eur, alpha=0.7)+
+  scale_color_manual(values=c("yellow", "green", "red"))+
+  labs(color = "Michelin stars")+
+  ggtitle("Distribution of restaurants around Europe")
+MyMap2+ xlim(-10,25) + ylim(35,60)
+```
+
+Correlation matrix
+```{r}
+dummy_eur %>% select(-c(city,region,cuisine,price)) %>%cor() %>% melt() %>% #here I am creating the correlation matrix between each other variable (excluding Sex) and "melting" it to creating a data frame which will be used to then create the ggplot 
+  ggplot(aes(x=Var1, y=Var2, fill=value)) + 
+    geom_tile() +
+    geom_text(aes(Var1, Var2, label = round(value, 2)), size = 3, color="black") +
+      scale_fill_gradient2(low = "lightblue", high = "blue",
+                         limit = c(-1,1), name="Correlation") +
+    theme(axis.text.x = element_text(angle = 45, vjust = .5), 
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          panel.background = element_blank())
+```
+
+
+
+```{r}
+res<-cor(select(dummy_eur,-c("city","region","cuisine","price")))
+corrplot(res, type = "upper", 
+         tl.col = "blue", tl.srt = 45)
+res<-cor(select(dummy_eur,-c("city","region","cuisine","price","cuisine_Traditional")))
+corrplot(res, type = "upper", 
+         tl.col = "blue", tl.srt = 45)
+```
+
+```{r}
+plot(MG$price~MG$stars, xlab="stars",ylab="price", col="blue")
+plot(MG$price~MG$latitude, xlab="latitude",ylab="price", col="blue")
+plot(MG$price~MG$longitude, xlab="longitude",ylab="price", col="blue")
+```
+
+
+```{r}
+dummy_eur_fact<-dummy_eur
+dummy_eur_fact$cuisine<-as.factor(dummy_eur$cuisine)
+ggplot(data= dummy_eur_fact, aes(x=cuisine))+
+geom_bar(color="blue", fill="lightblue", alpha=0.2)
+```
+
+
+
+```{r}
+count_cuisine<-count(dummy_eur, c("cuisine"))
+count_city<-count(dummy_eur, c("city"))
+count_region<-count(dummy_eur, c("region"))
+
+
+best_cuisine<-arrange(count_cuisine, desc(freq)) #detach dplyr before run 
+best_city<-arrange(count_city, desc(freq))
+best_region<-arrange(count_region, desc(freq))
+#best_cuisine<-best_cuisine[1:10,]$cuisine
+```
+
+
+
+```{r}
+barplot(best_cuisine$freq[1:5],names.arg=best_cuisine$cuisine[1:5], col = "blue")+
+  title("Best five type of cuisine")
+barplot(best_city$freq[1:5],names.arg=best_city$city[1:5], col = "blue")+
+  title("Best five city with for number of Michelin stars")
+barplot(best_region$freq[1:5],names.arg=best_region$region[1:5], col = "blue")+
+  title("Best five region with for number of Michelin stars")
+```
+
+```{r}
+plot(MG, col="blue")
+```
+```{r}
+plot(MG$price~MG$stars, xlab="stars",ylab="price", col="blue")
+plot(MG$price~MG$latitude, xlab="latitude",ylab="price", col="blue")
+plot(MG$price~MG$longitude, xlab="longitude",ylab="price", col="blue")
+```
+
+
+--------------------------------------------------------------------------------
+#SUBSET SELECTION
+
+```{r}
+#cor(select(dummy_world, -c("city","region","cuisine","price")))
+```
+
+```{r}
+regfit.full=regsubsets(dummy_world$price~.-cuisine-city-region-cuisine_Traditional,data=dummy_world, nvmax=18, method = "forward")
+reg.summary=summary(regfit.full)
+reg.summary
+```
+
+```{r}
+which.min(reg.summary$cp)
+plot(reg.summary$cp,xlab="Number of Variables",ylab="Cp")
+points(4,reg.summary$cp[4],pch=20,col="blue")
+
+plot(regfit.full,scale="Cp")
+
+```
+
+
+--------------------------------------------------------------------------------
+#SUPERVISED LEARNING
+
+
+--------------------------------------------------------------------------------
+#LINEAR MODEL 
+
+
+#Europe
+```{r}
+mod_eur=lm(dummy_eur$price~.-cuisine-city-region-cuisine_Traditional, data=dummy_eur)
+summary(mod_eur)
+```
+The R square of our linear model is 0.5, which means that the
+percentage of explained variance is approx 50%
+
+#World
+```{r}
+mod_world=lm(price~.-cuisine-city-region-cuisine_Traditional,data=dummy_world)
+summary(mod_world)
+```
+log-linear
+```{r}
+mod_log=lm(log(price)~.-cuisine-city-region-cuisine_Asian,data=dummy_eur)
+summary(mod_log)
+```
+
+not improves the results
+
+
+Assumptions of Linear Regression: 
+```{r}
+plot(mod_eur, col="blue")
+```
+
+
+For the normality assumption to hold, the residuals should spread
+randomly around 0 and form a horizontal band.If the red trend line is
+approximately flat and close to zero, then one can assume that the
+residuals are normally distributed. This is not (high range) so NO
+NORMAL RESIDUALS
+We can also see by this plots:
+
+```{r}
+ols_plot_resid_hist(mod_eur)
+```
+
+
+Normality of price
+```{r}
+qqPlot(dummy_eur$price, ylab = "price")
+```
+```{r}
+ggqqplot(dummy_eur$price, color = "blue")
+```
+```{r}
+shapiro.test(dummy_eur$price)
+```
+p-value > 0.05 implying that the distribution of the data are not significantly different from normal distribution.
+Can't assume price normal.
+
+```{r}
+ggdensity(dummy_eur, x = "price", fill = "lightblue", title = "price") +
+  stat_overlay_normal_density(color = "blue", linetype = "dashed")
+```
+
+Trying with the logarithm
+```{r}
+shapiro.test(log(dummy_eur$price))
+```
+also not normal
+
+```{r}
+ggqqplot(mod_eur$residuals, color = "blue")
+```
+
+
+```{r}
+sqrt(vif(mod_eur))>2
+```
+no multicollinearity
+
+
+Test for heteroscedasticity
+```{r}
+model <- lm(dummy_world$price~.-cuisine-city-region-cuisine_Vegan, data = dummy_world)
+lmtest::bptest(model)
+```
+
+# Evaluate homoscedasticity
+# non-constant error variance test
+```{r}
+ncvTest(mod_eur)
+```
+test have a p-value less that a significance level of 0.05, therefore we can reject the null hypothesis that the variance of the residuals is constant and infer that heteroscedasticity is indeed present, thereby confirming our graphical inference.
+
+
+--------------------------------------------------------------------------------
+#ROBUST REGRESSION
+
+#Europe
+```{r}
+#linear regression:
+#mod_eur=lm(price~.-cuisine-city-region-cuisine_Traditional, data=dummy_eur)
+#mod_world=lm(price~.-cuisine-city-region-cuisine_Traditional,data=dummy_world)
+```
+
+```{r}
+#create plot of y-values vs. standardized residuals
+plot(dummy_eur$price, rstandard(mod_eur), ylab='Standardized Residuals', xlab='price',col="blue") 
+abline(h=0)
+
+```
+
+
+```{r}
+robust_eur<-lm_robust(price~.-city-region-cuisine-cuisine_Traditional, data=dummy_eur,se_type = "stata")
+summary(robust_eur)
+```
+All the coefficients are significant
+
+```{r}
+summary(mod_eur)$r.squared
+summary(robust_eur)$r.squared
+```
+```{r}
+library(MASS)
+robust_eur2<-rlm(price~.-city-region-cuisine-cuisine_Traditional,data=dummy_eur)
+summary(robust_eur2)
+```
+```{r}
+summary(mod_eur)$sigma
+summary(robust_eur2)$sigma
+```
+
+```{r}
+lmtest::bptest(mod_eur)
+```
+Reject the null hypotesys of homoscedasticity.
+
+
+# Evaluate homoscedasticity
+# non-constant error variance test
+```{r}
+ncvTest(mod_eur)
+```
+Reject the null hypotesys of homoscedasticity.
+
+
+
+#World
+```{r}
+robust_world<-lm_robust(price~.-city-region-cuisine-cuisine_Traditional, data=dummy_world,se_type = "stata")
+summary(robust_world)
+```
+
+```{r}
+summary(mod_world)$r.squared
+summary(robust_world)$r.squared
+```
+
+```{r}
+robust_world2<-rlm(price~.-city-region-cuisine-cuisine_Traditional,data=dummy_world)
+summary(robust_world2)
+```
+
+```{r}
+summary(mod_world)$sigma
+summary(robust_world2)$sigma
+```
+
+
+
+Test for heteroscedasticity:
+```{r}
+lmtest::bptest(mod_world)
+```
+
+# Evaluate homoscedasticity
+# non-constant error variance test
+```{r}
+ncvTest(mod_world)
+```
+
+
+--------------------------------------------------------------------------------
+#RANDOM FOREST
+
+#Europe
+```{r}
+set.seed(1)
+train <- sample (1: nrow (dummy_eur), nrow (dummy_eur) / 2)
+MG.test <- dummy_eur[-train , "price"]
+price.test<-dummy_eur$price[-train]
+```
+
+```{r}
+set.seed(1)
+randf=randomForest(price~.,data=dummy_eur,subset=train,mtry=7,importance=TRUE)
+randf
+```
+
+This means that R\^2 is 0.54, little better than linear.
+
+
+```{r}
+set.seed(1)
+yhat.bag <- predict(randf,newdata = dummy_eur[-train , ])
+plot (yhat.bag , MG.test, col="blue", xlab = "y predicted", ylab="Test set")
+abline (0, 1)
+mean1= mean ((yhat.bag - MG.test)^2)
+sqrt(mean1)
+
+
+
+R2 <- 1 - (sum((MG.test-yhat.bag)^2)/sum((MG.test-mean(MG.test))^2))
+R2
+```
+Same results as in the model MG without dummy
+
+
+```{r}
+tree.MG=tree(price~., data=dummy_eur)
+summary(tree.MG)
+```
+
+```{r}
+plot(tree.MG)
+text(tree.MG, pretty=0)
+```
+
+```{r}
+tree.MG
+```
+
+```{r}
+importance(randf)
+varImpPlot(randf)
+```
+
+
+
+#World
+```{r}
+set.seed(1)
+train <- sample (1: nrow (dummy_world), nrow (dummy_world) / 2)
+MG.test <- dummy_world[-train , "price"]
+price.test<-dummy_world$price[-train]
+```
+
+```{r}
+set.seed(1)
+randf=randomForest(price~.,data=dummy_world,subset=train,mtry=7,importance=TRUE)
+randf
+```
+
+```{r}
+set.seed(1)
+yhat.bag <- predict(randf,newdata = dummy_world[-train , ])
+plot (yhat.bag , MG.test, col="blue", xlab = "y predicted", ylab="Test set")
+abline (0, 1)
+mean1= mean ((yhat.bag - MG.test)^2)
+sqrt(mean1)
+R2 <- 1 - (sum((MG.test-yhat.bag)^2)/sum((MG.test-mean(MG.test))^2))
+R2
+```
+
+```{r}
+importance(randf)
+varImpPlot(randf)
+```
+
+```{r}
+tree.MG=tree(dummy_world$price~., data=dummy_world)
+summary(tree.MG)
+```
+
+```{r}
+plot(tree.MG)
+text(tree.MG, pretty=0)
+```
+
+--------------------------------------------------------------------------------
+#UNSUPERVISED LEARNING
+
+
+--------------------------------------------------------------------------------
+#HIERARCHICAL CLUSTERING
+
+#Europe
+```{r}
+set.seed(1)
+train_index <- sample (1: nrow (MG), nrow (MG) * 2/3)
+train<-MG[train_index,]
+test<-MG[-train_index,]
+```
+
+
+```{r}
+#Convert data to a SpatialPointsDataFrame object
+set.seed(1)
+long_lat <- SpatialPointsDataFrame(matrix(c(train$longitude,train$latitude), ncol=2),                                  data.frame(ID=seq(1:length(train$longitude))),proj4string=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84"))
+long_lat=as.data.frame(subset(long_lat,select=-ID))
+long_lat_df<-train
+long_lat_df$name<-NULL
+long_lat_df$latitude<-NULL
+long_lat_df$longitude<-NULL
+long_lat_df$city<-NULL
+long_lat_df$region<-NULL
+long_lat_df$cuisine<-NULL
+long_lat_df$price<-NULL
+long_lat_df$coords.x1<-long_lat$coords.x1
+long_lat_df$coords.x2<-long_lat$coords.x2
+long_lat_df_sc = scale(long_lat_df)
+
+dist_mat <- dist(long_lat_df_sc, method = 'euclidean')
+hc_cluster = hclust(as.dist(dist_mat), method="complete") 
+
+plot(hc_cluster)
+abline(h = 5, col = "cyan")
+```
+
+
+
+
+```{r}
+library(dplyr)
+```
+
+
+```{r}
+set.seed(1)
+fit <- cutree(hc_cluster, k = 7)
+fit=as.data.frame(fit)
+long_lat_df_cl <- mutate(long_lat_df,cluster=fit)
+dplyr::count(fit,cluster=fit)    #unselect library plyr before run
+```
+
+
+```{r}
+set.seed(1)
+ggplot(long_lat_df_cl, aes(x=coords.x1, y = coords.x2,color=factor(cluster$fit)) )+
+  borders("world", colour="grey70", fill="white")+
+   geom_point(pch=20,alpha=1, size=3)+
+   xlab("longitude")+ ylab("latitude")+ xlim(-10,25) + ylim(35,60)+
+  scale_color_manual(values=c( "yellow","red", "blue", "cyan", "black",
+                                           "purple", "pink"))
+```
+
+```{r}
+train$cluster_value = as.factor(fit$fit)  #add clusters to train
+#see if this variable is significant for the regression
+```
+
+
+```{r}
+model.lm =  lm(data = train, price ~ .-city-region-cuisine)
+summary(model.lm)
+```
+
+
+
+
